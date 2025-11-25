@@ -1,7 +1,7 @@
 {
     "name": "ms-model-aodv",
     "repo_url": "https://github.com/znetlink/ms-model-aodv",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "MANET自组网AODV路由模型",
     "author": "ZNetLink",
     "email": "jiazequn@znetlink.com",

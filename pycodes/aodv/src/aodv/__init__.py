@@ -26,6 +26,7 @@ from ipv4.ip_support import (
     LIMITED_BROADCAST_ADDR,
     ON_DEMAND_NOTIFY_TYPE_FOUND,
     ON_DEMAND_NOTIFY_TYPE_NEED,
+    ON_DEMAND_NOTIFY_TYPE_FAILED,
 )
 
 from ipv4.routing import (
@@ -131,6 +132,16 @@ class RreqCacheEntry:
     originator_addr: ipaddress.IPv4Address
     rreq_id: int
     expiry_time: float
+
+
+@dataclass(slots=True)
+class PendingDiscovery:
+    """按需路由发现中的状态"""
+
+    dest: ipaddress.IPv4Address
+    rreq_id: int
+    retry_count: int
+    expiry_time: float  # 本次尝试的超时时刻（sim_time）
 
 
 @dataclass(slots=True)
@@ -284,6 +295,8 @@ class AodvProcess:
         self.route_table: Dict[ipaddress.IPv4Address, RouteEntry] = {}
         self.neighbor_table: Dict[ipaddress.IPv4Address, NeighborEntry] = {}
         self.rreq_cache: Dict[str, RreqCacheEntry] = {}
+        # 正在进行中的路由发现（按目的地址）
+        self.pending_discoveries: Dict[ipaddress.IPv4Address, PendingDiscovery] = {}
 
         # 定时器参数
         self.active_route_timeout: float = DEFAULT_ACTIVE_ROUTE_TIMEOUT
@@ -362,6 +375,7 @@ class AodvProcess:
         self.route_table.clear()
         self.neighbor_table.clear()
         self.rreq_cache.clear()
+        self.pending_discoveries.clear()
         self.active_route_timeout = DEFAULT_ACTIVE_ROUTE_TIMEOUT
         self.hello_interval = DEFAULT_HELLO_INTERVAL
         self.allowed_hello_loss = DEFAULT_ALLOWED_HELLO_LOSS
@@ -597,6 +611,9 @@ class AodvProcess:
             logger.warning("AODV: IP module not resolved, cannot notify route result")
             return
 
+        # 当前目的的路由发现已结束（无论成功还是失败）
+        self.pending_discoveries.pop(dest_addr, None)
+
         ici = ms.ici_create("ip_on_demand_routing_notify")
         ici.set_int("type", result)
         ici.set_string("dest address", str(dest_addr))
@@ -605,7 +622,7 @@ class AodvProcess:
         ms.intrpt_schedule_remote(ms.sim_time(), REMOTE_INTRPT_CODE_ON_DEMAND_NOTIFY, self.ip_module)
         ms.ici_install(None)
 
-        logger.debug("AODV: Notified IP layer - route found for %s", dest_addr)
+        logger.debug("AODV: Notified IP layer - route result %s for %s", result, dest_addr)
 
     def send_hello_message(self) -> None:
         if self.my_address is None:
@@ -650,6 +667,23 @@ class AodvProcess:
         for key, entry in list(self.rreq_cache.items()):
             if now > entry.expiry_time:
                 del self.rreq_cache[key]
+
+        # 处理路由发现的超时与重试
+        for dest, pending in list(self.pending_discoveries.items()):
+            if now < pending.expiry_time:
+                continue
+
+            # 还可以重试，继续发送 RREQ
+            if pending.retry_count < self.rreq_retries:
+                self._send_rreq_for_discovery(pending)
+            else:
+                # 重试次数已用尽，通知 IP 层失败
+                self.notify_ip_route_result(dest, ON_DEMAND_NOTIFY_TYPE_FAILED)
+                logger.debug(
+                    "AODV: Route discovery failed for %s after %s attempts",
+                    dest,
+                    pending.retry_count,
+                )
 
     def remove_from_ip_routing_table(self, dest: ipaddress.IPv4Address, route: RouteEntry) -> None:
         if self.ip_module_data is None:
@@ -1091,13 +1125,43 @@ class AodvProcess:
             self.notify_ip_route_result(dest_addr, ON_DEMAND_NOTIFY_TYPE_FOUND)
             return
 
+        # 已经有对该目的的路由发现正在进行中，避免重复发起
+        if dest_addr in self.pending_discoveries:
+            logger.debug("AODV: Route discovery already in progress for %s", dest_addr)
+            return
+
+        # 为本次路由发现分配一个新的 RREQ ID
+        rreq_id = self.rreq_id
+        self.rreq_id += 1
+
+        pending = PendingDiscovery(
+            dest=dest_addr,
+            rreq_id=rreq_id,
+            retry_count=0,
+            expiry_time=now,  # 立即触发第一次发送
+        )
+        self.pending_discoveries[dest_addr] = pending
+
+        self._send_rreq_for_discovery(pending)
+
+    def _send_rreq_for_discovery(self, pending: PendingDiscovery) -> None:
+        """根据 pending 状态构造并发送一次 RREQ，同时更新重试计数和超时时间。"""
+        if self.my_address is None:
+            return
+
+        now = ms.sim_time()
+        dest_addr = pending.dest
+
+        route = self.route_table.get(dest_addr)
+
+        # 每次尝试递增本端序列号
         self.seq_num += 1
 
         rreq_header = AodvHeader(type=AODV_MSG_TYPE_RREQ, flags=0, reserved=0)
         rreq = RreqMessage(
             header=rreq_header,
             hop_count=0,
-            rreq_id=self.rreq_id,
+            rreq_id=pending.rreq_id,
             dest_addr=addr_to_uint32(dest_addr),
             dest_seq_num=0,
             originator_addr=addr_to_uint32(self.my_address),
@@ -1109,8 +1173,14 @@ class AodvProcess:
         else:
             rreq.header.flags |= AODV_FLAG_UNKNOWN_SEQ_NUM
 
-        self.rreq_id += 1
-
         self.broadcast_rreq(rreq)
-        logger.debug("AODV: Initiated route discovery for %s (RREQ ID: %s)", dest_addr, rreq.rreq_id)
 
+        pending.retry_count += 1
+        pending.expiry_time = now + self.net_traversal_time
+
+        logger.debug(
+            "AODV: Sent RREQ for %s (RREQ ID: %s, attempt: %s)",
+            dest_addr,
+            pending.rreq_id,
+            pending.retry_count,
+        )
