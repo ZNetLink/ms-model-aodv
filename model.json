@@ -14,7 +14,9 @@
         "iconLibraries": [],
         "scenarios": [],
         "platforms": [],
-        "devices": [],
+        "devices": [
+            "models/aodv_host.dev.m"
+        ],
         "processes": [
             {
                 "model": "models/aodv.pr.m",
