@@ -141,7 +141,7 @@
             ],
             "closure model": "generic_wireless_closure",
             "rxgroup model": "generic_wireless_rxgroup",
-            "propdel model": "generic_wireless_txdel"
+            "txdel model": "generic_wireless_txdel"
           },
           "_editorMetadata": {
             "position": {
