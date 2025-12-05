@@ -1,5 +1,5 @@
 {
-  "id": "network_node",
+  "id": "aodv_host",
   "type": "网络节点",
   "subtype": "",
   "desc": "网络设备节点模型",
@@ -272,6 +272,9 @@
         }
       ],
       "notifications": [],
+      "pipelinePackages": [
+        "generic_wireless"
+      ],
       "edgeMeta": [
         {
           "id": "03ed7e67-543b-46fe-8237-6b3600c01e13",
