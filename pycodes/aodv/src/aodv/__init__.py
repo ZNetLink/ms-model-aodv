@@ -308,7 +308,7 @@ class AodvProcess:
 
         self.pr_handle = None
 
-    @ms.state_enter("Register")
+    @ms.state_enter("Register", begin=True)
     def enter_register(self) -> None:
         self.my_module = ms.self_obj()
         if self.my_module is None:
@@ -437,23 +437,23 @@ class AodvProcess:
     def enter_disabled(self) -> None:
         return
 
-    @ms.transition("Register", "Init")
+    @ms.transition("Register", "Init", "f8f9d3d0-d395-4040-b1f3-fe9c291ff5b9")
     def register_to_init(self) -> bool:
         return True
 
-    @ms.transition("Init", "Idle")
+    @ms.transition("Init", "Idle", "da829d69-8237-4aaa-b2ae-b421a702bfa6")
     def init_to_idle(self) -> bool:
         return bool(self.enabled_intfs)
 
-    @ms.transition("Idle", "Idle")
+    @ms.transition("Idle", "Idle", "16a90e42-7709-490f-99e2-b73e6adfd1af")
     def idle_to_idle(self) -> bool:
         return True
 
-    @ms.transition("Init", "Disabled")
+    @ms.transition("Init", "Disabled", "955c8818-3070-4625-8ba4-d489e090d072")
     def init_to_disabled(self) -> bool:
         return not self.enabled_intfs
 
-    @ms.transition("Disabled", "Disabled")
+    @ms.transition("Disabled", "Disabled", "e63b8f81-59bc-47ef-8a52-77e5fe3b969c")
     def disabled_to_disabled(self) -> bool:
         return True
 
